@@ -1,15 +1,60 @@
+use std::fmt;
+
 use bitvec::prelude::*;
+
+#[derive(Clone, Debug)]
+pub enum EOperator {
+    And,
+    Or,
+    Not,
+    Xor,
+    Zero,
+    One,
+}
+
+impl fmt::Display for EOperator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+        // or, alternatively:
+        // fmt::Debug::fmt(self, f)
+    }
+}
+
+
+#[derive(Clone)]
+pub struct Operator {
+    pub eoperator: EOperator,
+}
+
+impl Operator {
+    fn new() -> Self {
+        Self {
+            eoperator: EOperator::And,
+        }
+    }
+
+    fn apply(&self, a: u8, b: u8) -> u8 {
+        match self.eoperator {
+            EOperator::And => a & b,
+            EOperator::Or => a | b,
+            EOperator::Not =>!a,
+            EOperator::Xor => a ^ b,
+            EOperator::Zero => 0,
+            EOperator::One => 0xFF,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Neuron {
-    pub operator: u8, // todo: make an enum
+    pub operator: Operator,
     pub error_direction: u8
 }
 
 impl Neuron {
     fn new() -> Self {
         Self {
-            operator: 0,
+            operator: Operator::new(),
             error_direction: 0,
         }
     }
@@ -51,13 +96,82 @@ impl BinaryNN {
             self.connection_values.set(i, bool_val);
         }
     }
+
+    fn train(&mut self, inputs: &[u8], outputs: &[u8]) {
+        self.set_input_values(inputs);
+
+        let layer_lens = [4, 2]; //, 1]; - we only need to iterate over n-1 layers, as n-1 computes the results for layer n
+        let last_layer_len = 1;
+
+        // feed forward
+        // 1. iterate over each layer
+        // 2. iterate over each neuron in the layer, compute the result and push to the next layers input
+        let mut i = 0;
+        let mut start_of_layer_index = 0;
+        let mut start_of_next_layer_index = 0;
+        for (_, layer_len) in layer_lens.iter().enumerate() {
+            start_of_next_layer_index += layer_len;
+
+            for j in (0..*layer_len).step_by(2) {
+                let a = if self.connection_values[i] { 0x1 } else { 0x0 };
+                let b = if self.connection_values[i + 1] { 0x1 } else { 0x0 };
+
+                let ni = i / 2;
+                let output = self.neurons[ni].operator.apply(a, b);
+                println!("n{}:  a:{} b:{} -> op:{} -> o:{}", ni, a, b, self.neurons[ni].operator.eoperator, output);
+
+                // push the results to the inputs for the next layer
+                let neuron_index_on_current_layer = j / 2;
+                let out_i = start_of_next_layer_index + neuron_index_on_current_layer;
+                self.connection_values.set(out_i, output != 0);
+
+                i += 2;
+            }
+
+            start_of_layer_index += layer_len;
+        }
+
+        // compare results with outputs to find an error value
+        // 1. iterate over the last layer
+        let mut error = false;
+        for _ in 0..last_layer_len {
+            let o = if self.connection_values[i] { 0x1 } else { 0x0 };
+
+            if outputs[0] != o {
+                error = true;
+                break;
+            }
+
+            i += 1;
+        }
+
+        if error {
+            println!("Error");
+        } else {
+            print!("OK");
+            return;
+        }
+
+        // back propagate on error
+    }
+}
+
+
+fn example_function_to_learn(data: &[u8]) -> u8 {
+    let n1 = data[0] | data[1];
+    let n2 = data[2] & data[3];
+    let n3 = n1 | n2;
+    return n3;
 }
 
 fn main() {
     println!("Hello, world!");
 
     let mut bnn = BinaryNN::new();
-    bnn.set_input_values(&[1, 0, 1, 0]);
+
+    let in_1 = [1, 0, 0, 0];
+    let out_1 = [example_function_to_learn(&in_1)];
+    bnn.train(&in_1, &out_1);
 
     println!("done");
 }
