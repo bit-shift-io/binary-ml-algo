@@ -32,7 +32,10 @@ impl BinaryNN {
         let mut connection_values = bitvec![u8, Msb0; 0; total_len];
         connection_values[0 .. total_len].store::<u8>(0x0);
         
-        let neurons = vec![Neuron::new(); total_len];
+        let layer_1_neurons_len = 2;
+        let layer_2_neuron_len = 1;
+        let total_neuron_len = layer_1_neurons_len + layer_2_neuron_len;
+        let neurons = vec![Neuron::new(); total_neuron_len];
 
         Self {
             connection_values,
