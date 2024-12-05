@@ -19,12 +19,22 @@ impl BinaryNN {
             connection_values
         }
     }
+
+    fn set_input_values(&mut self, data: &[u8]) {
+        assert_eq!(data.len(), 4); // todo: change this to layer_1_len
+
+        for (i, v) in data.iter().enumerate() {
+            let bool_val = (*v != 0);
+            self.connection_values.set(i, bool_val);
+        }
+    }
 }
 
 fn main() {
     println!("Hello, world!");
 
-    let bnn = BinaryNN::new();
+    let mut bnn = BinaryNN::new();
+    bnn.set_input_values(&[1, 0, 1, 0]);
 
     println!("done");
 }
