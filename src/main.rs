@@ -26,12 +26,6 @@ impl fmt::Display for Operator {
     }
 }
 
-/* 
-#[derive(Clone)]
-pub struct Operator {
-    pub eoperator: EOperator,
-}*/
-
 impl Operator {
     fn new() -> Self {
         Operator::And
@@ -279,6 +273,13 @@ fn example_function_to_learn(data: &[u8]) -> u8 {
     return n3;
 }
 
+fn example_function_to_learn_2(data: &[u8]) -> u8 {
+    let n1 = data[0] | data[1];
+    let n2 = data[2] & data[3];
+    let n3 = n1 ^ n2;
+    return n3;
+}
+
 fn main() {
     println!("Binary Machine Learning Algorithm");
 
@@ -286,16 +287,25 @@ fn main() {
     let mut bnn = BinaryNN::new();
 
     // all possible permutations for the function inputs
+    // note: this is not yet the complete set, it would be every possibility - every number from 0 -> 255
     let function_inputs = [
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
         [0, 0, 0, 1],
+
+        [1, 1, 1, 1],
+        [0, 0, 0, 0],
+
+        [0, 1, 1, 1],
+        [1, 0, 1, 1],
+        [1, 1, 0, 1],
+        [1, 1, 1, 0],
     ];
 
     // run the function over the inputs to generate a tuple of (input, output) pairs
     let training_data = function_inputs.map(|inputs| {
-        return (inputs, [example_function_to_learn(&inputs)]);
+        return (inputs, [example_function_to_learn_2(&inputs)]);
     });
 
     // learn on training data
@@ -316,5 +326,23 @@ fn main() {
         TrainResult::Success => println!("Succesfully Learned!"),
     }
 */
-    println!("done");
+    // verify that there are now no errors
+    let mut final_train_result = TrainResult::Success;
+    for (inputs, outputs) in training_data {
+        let train_result = bnn.train(&inputs, &outputs, max_steps);
+        match train_result {
+            TrainResult::Failure => {
+                final_train_result = train_result;
+                break;
+            },
+            TrainResult::Success => (),
+        }
+    }
+
+    println!("");
+    match final_train_result {
+        TrainResult::Failure => println!("Failed to learn the algorithm."),
+        TrainResult::Success => println!("Successfully learned the algorithm."),
+    }
+    println!("");
 }
