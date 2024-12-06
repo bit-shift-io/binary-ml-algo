@@ -2,8 +2,8 @@ use std::fmt;
 
 use bitvec::prelude::*;
 
-#[derive(Clone, Debug)]
-pub enum EOperator {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Operator {
     And,
     Or,
     Not,
@@ -12,7 +12,7 @@ pub enum EOperator {
     One,
 }
 
-impl fmt::Display for EOperator {
+impl fmt::Display for Operator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
         // or, alternatively:
@@ -20,27 +20,46 @@ impl fmt::Display for EOperator {
     }
 }
 
-
+/* 
 #[derive(Clone)]
 pub struct Operator {
     pub eoperator: EOperator,
-}
+}*/
 
 impl Operator {
     fn new() -> Self {
-        Self {
-            eoperator: EOperator::And,
-        }
+        Operator::And
     }
 
     fn apply(&self, a: u8, b: u8) -> u8 {
-        match self.eoperator {
-            EOperator::And => a & b,
-            EOperator::Or => a | b,
-            EOperator::Not =>!a,
-            EOperator::Xor => a ^ b,
-            EOperator::Zero => 0,
-            EOperator::One => 0xFF,
+        use Operator::*;
+        match *self {
+            And => a & b,
+            Or => a | b,
+            Not =>!a,
+            Xor => a ^ b,
+            Zero => 0,
+            One => 0xFF,
+        }
+    }
+
+    fn get_next_operator(&self) -> Self {
+        use Operator::*;
+        match *self {
+            And => Or,
+            Or => Not,
+            Not => Xor,
+            Xor => Zero,
+            Zero => One,
+            One => And,
+        }
+    }
+
+    fn is_last(&self) -> bool {
+        use Operator::*;
+        match *self {
+            One => true,
+            _ => false,
         }
     }
 }
@@ -92,7 +111,7 @@ impl BinaryNN {
         assert_eq!(data.len(), 4); // todo: change this to layer_1_len
 
         for (i, v) in data.iter().enumerate() {
-            let bool_val = (*v != 0);
+            let bool_val = *v != 0;
             self.connection_values.set(i, bool_val);
         }
     }
@@ -118,7 +137,7 @@ impl BinaryNN {
 
                 let ni = i / 2;
                 let output = self.neurons[ni].operator.apply(a, b);
-                println!("n{}:  a:{} b:{} -> op:{} -> o:{}", ni, a, b, self.neurons[ni].operator.eoperator, output);
+                println!("n{}:  a:{} b:{} -> op:{} -> o:{}", ni, a, b, self.neurons[ni].operator, output);
 
                 // push the results to the inputs for the next layer
                 let neuron_index_on_current_layer = j / 2;
@@ -148,11 +167,40 @@ impl BinaryNN {
         if error {
             println!("Error");
         } else {
-            print!("OK");
+            println!("OK");
             return;
         }
 
-        // back propagate on error
+        // back propagate on error, starting at the last neuron
+        self.back_propagate(self.neurons.len() - 1);
+    }
+
+    fn back_propagate(&mut self, ni: usize) {
+        // change the neurons operator, seeing if any of them change the output to the correct results
+        let start_operator = self.neurons[ni].operator.clone();
+        self.neurons[ni].operator = self.neurons[ni].operator.get_next_operator();
+
+        while self.neurons[ni].operator != start_operator {
+           
+            // check if the new operator resolves the error
+            let is_error_resolved = false;
+            if is_error_resolved {
+                return;
+            }
+
+            // try the next operator
+            self.neurons[ni].operator = self.neurons[ni].operator.get_next_operator();
+        }
+
+        // changing the operator did not resolve the problem,
+        // so we need to try forwarding the error to each of our children until something they do results in the correct result
+        self.neurons[ni].error_direction += 1;
+
+        if ni == 0 {
+            return; // we've reached the end, no more neurons to back propagate to
+        }
+
+        return self.back_propagate(ni - 1);
     }
 }
 
