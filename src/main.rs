@@ -176,6 +176,10 @@ impl BinaryNN {
     }
 
     fn back_propagate(&mut self, ni: usize) {
+        // todo: I don't think this will work to simply try all changes and use the first that will work for this neuron
+        // instead we should change this neuron till we read is_last, then pass to the children till they all reach is_last
+        // then again switch to changing this neuron...
+
         // change the neurons operator, seeing if any of them change the output to the correct results
         let start_operator = self.neurons[ni].operator.clone();
         self.neurons[ni].operator = self.neurons[ni].operator.get_next_operator();
