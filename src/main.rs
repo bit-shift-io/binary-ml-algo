@@ -1,6 +1,12 @@
-use std::fmt;
+use std::{collections::VecDeque, fmt};
 
 use bitvec::prelude::*;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TrainResult {
+    Success,
+    Failure,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operator {
@@ -83,6 +89,10 @@ impl Neuron {
 pub struct BinaryNN {
     pub connection_values: BitVec<u8, Msb0>,
     pub neurons: Vec<Neuron>,
+
+    // This contains indicies of the last changed neuron indexes
+    // to help us determine which neuron to change next
+    pub neuron_error_indexes: VecDeque<usize>
 }
 
 impl BinaryNN {
@@ -103,7 +113,8 @@ impl BinaryNN {
 
         Self {
             connection_values,
-            neurons
+            neurons,
+            neuron_error_indexes: VecDeque::new(),
         }
     }
 
@@ -116,11 +127,36 @@ impl BinaryNN {
         }
     }
 
-    fn train(&mut self, inputs: &[u8], outputs: &[u8]) {
+    fn train(&mut self, inputs: &[u8], outputs: &[u8], max_steps: usize) -> TrainResult {
+        // loop until train_step returns false or max_steps is reached
+        for _ in 0..max_steps {
+            let train_result = self.train_step(inputs, outputs);
+            if train_result == TrainResult::Success {
+                return TrainResult::Success;
+            }
+        }
+
+        return TrainResult::Failure;
+    }
+
+    fn train_step(&mut self, inputs: &[u8], outputs: &[u8]) -> TrainResult {
+        self.forward_propagate(inputs);
+
+        let error = self.check_for_error(outputs);
+
+        // back propagate on error, starting at the last neuron
+        if error == TrainResult::Failure {
+            self.back_propagate(self.neurons.len() - 1);
+        }
+
+        return error;
+    }
+
+    fn forward_propagate(&mut self, inputs: &[u8]) {
         self.set_input_values(inputs);
 
         let layer_lens = [4, 2]; //, 1]; - we only need to iterate over n-1 layers, as n-1 computes the results for layer n
-        let last_layer_len = 1;
+        
 
         // feed forward
         // 1. iterate over each layer
@@ -149,37 +185,63 @@ impl BinaryNN {
 
             start_of_layer_index += layer_len;
         }
+    }
+
+    fn check_for_error(&self, outputs: &[u8]) -> TrainResult {
+        let layer_lens = [4, 2]; //, 1]; - we only need to iterate over n-1 layers, as n-1 computes the results for layer n
+        let last_layer_len = 1;
+
+        let mut i = 0;
+        for (_, layer_len) in layer_lens.iter().enumerate() {
+            i += layer_len;
+        }
 
         // compare results with outputs to find an error value
         // 1. iterate over the last layer
-        let mut error = false;
+        let mut error = TrainResult::Success;
         for _ in 0..last_layer_len {
             let o = if self.connection_values[i] { 0x1 } else { 0x0 };
 
             if outputs[0] != o {
-                error = true;
+                error = TrainResult::Failure;
+                println!("Error. Expected {} but got {}", outputs[0], o);
                 break;
             }
 
             i += 1;
         }
 
-        if error {
-            println!("Error");
-        } else {
-            println!("OK");
-            return;
+        if error == TrainResult::Success {
+            println!("Success");
         }
 
-        // back propagate on error, starting at the last neuron
-        self.back_propagate(self.neurons.len() - 1);
+        return error;
     }
 
     fn back_propagate(&mut self, ni: usize) {
+        
+        // change the top level neuron first
+        // then on consecutive errors, feed them to our children
+        //
+
+        // find the neuron that needs to change, this could just be an index
+        // pointing to the last neuron idx that changed and decrement it?
+        let mut ni = *self.neuron_error_indexes.iter().min().or(Some(&self.neurons.len())).unwrap();
+        if ni == self.neurons.len() {
+            self.neuron_error_indexes.clear();
+            ni = self.neurons.len() - 1;
+        }
+
+        self.neurons[ni].operator = self.neurons[ni].operator.get_next_operator();
+
+        self.neuron_error_indexes.push_back(ni);
+
         // todo: I don't think this will work to simply try all changes and use the first that will work for this neuron
         // instead we should change this neuron till we read is_last, then pass to the children till they all reach is_last
         // then again switch to changing this neuron...
 
+
+        /*
         // change the neurons operator, seeing if any of them change the output to the correct results
         let start_operator = self.neurons[ni].operator.clone();
         self.neurons[ni].operator = self.neurons[ni].operator.get_next_operator();
@@ -205,6 +267,7 @@ impl BinaryNN {
         }
 
         return self.back_propagate(ni - 1);
+        */
     }
 }
 
@@ -217,13 +280,41 @@ fn example_function_to_learn(data: &[u8]) -> u8 {
 }
 
 fn main() {
-    println!("Hello, world!");
+    println!("Binary Machine Learning Algorithm");
 
+    let max_steps = 100;
     let mut bnn = BinaryNN::new();
 
+    // all possible permutations for the function inputs
+    let function_inputs = [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1],
+    ];
+
+    // run the function over the inputs to generate a tuple of (input, output) pairs
+    let training_data = function_inputs.map(|inputs| {
+        return (inputs, [example_function_to_learn(&inputs)]);
+    });
+
+    // learn on training data
+    for (inputs, outputs) in training_data {
+        let train_result = bnn.train(&inputs, &outputs, max_steps);
+        match train_result {
+            TrainResult::Failure => println!("Failed to learn!"),
+            TrainResult::Success => println!("Succesfully Learned!"),
+        }
+    }
+    /*
     let in_1 = [1, 0, 0, 0];
     let out_1 = [example_function_to_learn(&in_1)];
-    bnn.train(&in_1, &out_1);
+    let train_result = bnn.train(&in_1, &out_1, max_steps);
 
+    match train_result {
+        TrainResult::Failure => println!("Failed to learn!"),
+        TrainResult::Success => println!("Succesfully Learned!"),
+    }
+*/
     println!("done");
 }
