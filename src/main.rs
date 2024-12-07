@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, fmt};
-
+use rand::seq::SliceRandom; // Import for shuffle
+use rand::thread_rng;
 use bitvec::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,14 +34,15 @@ impl Operator {
 
     fn apply(&self, a: u8, b: u8) -> u8 {
         use Operator::*;
-        match *self {
+        let r = match *self {
             And => a & b,
             Or => a | b,
             Not =>!a,
             Xor => a ^ b,
-            Zero => 0,
-            One => 0xFF,
-        }
+            Zero => 0x0,
+            One => 0x1,
+        };
+        return r & 0x1; // we only care about the first bit
     }
 
     fn get_next_operator(&self) -> Self {
@@ -121,16 +123,20 @@ impl BinaryNN {
         }
     }
 
-    fn train(&mut self, inputs: &[u8], outputs: &[u8], max_steps: usize) -> TrainResult {
+    // Returns a pair containing (final result, how many steps were taken)
+    fn train(&mut self, inputs: &[u8], outputs: &[u8], max_steps: usize) -> (TrainResult, usize) {
         // loop until train_step returns false or max_steps is reached
+        let mut error_count = 0;
         for _ in 0..max_steps {
             let train_result = self.train_step(inputs, outputs);
             if train_result == TrainResult::Success {
-                return TrainResult::Success;
+                return (TrainResult::Success, error_count);
+            } else {
+                error_count += 1;
             }
         }
 
-        return TrainResult::Failure;
+        return (TrainResult::Failure, error_count);
     }
 
     fn train_step(&mut self, inputs: &[u8], outputs: &[u8]) -> TrainResult {
@@ -221,12 +227,17 @@ impl BinaryNN {
         // find the neuron that needs to change, this could just be an index
         // pointing to the last neuron idx that changed and decrement it?
         let mut ni = *self.neuron_error_indexes.iter().min().or(Some(&self.neurons.len())).unwrap();
-        if ni == self.neurons.len() {
+        if ni == 0 {
             self.neuron_error_indexes.clear();
             ni = self.neurons.len() - 1;
+        } else {
+            ni = ni - 1;
         }
 
+        let previous_neuron_operator = self.neurons[ni].operator.clone();
         self.neurons[ni].operator = self.neurons[ni].operator.get_next_operator();
+        println!("Changing n{} from {} -> {}", ni, previous_neuron_operator, self.neurons[ni].operator);
+        println!("");
 
         self.neuron_error_indexes.push_back(ni);
 
@@ -280,12 +291,21 @@ fn example_function_to_learn_2(data: &[u8]) -> u8 {
     return n3;
 }
 
+fn u8_to_binary_array(value: u8) -> [u8; 4] {
+    let mut binary = [0u8; 4];
+    for i in (0..4).rev() {
+        binary[i] = (value >> i) & 0x1;
+    }
+    return binary;
+}
+
 fn main() {
     println!("Binary Machine Learning Algorithm");
 
     let max_steps = 100;
     let mut bnn = BinaryNN::new();
 
+    /* 
     // all possible permutations for the function inputs
     // note: this is not yet the complete set, it would be every possibility - every number from 0 -> 255
     let function_inputs = [
@@ -301,21 +321,52 @@ fn main() {
         [1, 0, 1, 1],
         [1, 1, 0, 1],
         [1, 1, 1, 0],
-    ];
+    ];*/
+
+    let function_inputs = (0..=u8::MAX).into_iter().map(|value: u8| -> [u8; 4] {
+        let r = u8_to_binary_array(value);
+        return r;
+    }).collect::<Vec<_>>();
 
     // run the function over the inputs to generate a tuple of (input, output) pairs
-    let training_data = function_inputs.map(|inputs| {
-        return (inputs, [example_function_to_learn_2(&inputs)]);
-    });
+    let mut training_data = function_inputs.iter().map(|inputs| {
+        return (inputs, [example_function_to_learn(inputs)]);
+    }).collect::<Vec<_>>();
+    training_data.shuffle(&mut thread_rng());
 
     // learn on training data
-    for (inputs, outputs) in training_data {
-        let train_result = bnn.train(&inputs, &outputs, max_steps);
-        match train_result {
-            TrainResult::Failure => println!("Failed to learn!"),
-            TrainResult::Success => println!("Succesfully Learned!"),
+    // we will likely need to loop over the complete traning data a few times in order to ensure we have learnt the function
+    // so we continue until there is a pass where there are no more errors (or till we reach max_training_data_passes).
+    let mut total_error_count = 0;
+    let mut total_pass_error_count = 0;
+    let max_training_data_passes = 1000;
+    for _ in 0..max_training_data_passes {
+        let mut errors_this_pass = 0;
+        for (inputs, outputs) in training_data.iter() {
+            let (_, error_count) = bnn.train(*inputs, outputs, max_steps);
+            if error_count >= max_steps {
+                println!("Failed to learn in the given steps?");
+            }
+
+            errors_this_pass += error_count;
+            total_error_count += error_count;
         }
+
+        if errors_this_pass == 0 {
+            break;
+        }
+
+        total_pass_error_count += 1;
     }
+
+    println!("");
+    if total_pass_error_count == max_training_data_passes {
+        println!("Failed to learn the algorithm with total error count: {} and total passes of: {}", total_error_count, total_pass_error_count);
+    } else {
+        println!("Learning is complete. Total training steps to learn the function: {}, with total passes of: {}", total_error_count, total_pass_error_count);
+    }
+    println!("");
+
     /*
     let in_1 = [1, 0, 0, 0];
     let out_1 = [example_function_to_learn(&in_1)];
@@ -328,8 +379,9 @@ fn main() {
 */
     // verify that there are now no errors
     let mut final_train_result = TrainResult::Success;
-    for (inputs, outputs) in training_data {
-        let train_result = bnn.train(&inputs, &outputs, max_steps);
+    for (inputs, outputs) in training_data.iter() {
+        bnn.forward_propagate(*inputs);
+        let train_result = bnn.check_for_error(outputs);
         match train_result {
             TrainResult::Failure => {
                 final_train_result = train_result;
